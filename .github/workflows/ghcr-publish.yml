@@ -3,6 +3,7 @@ name: ghcr-publish
 on:
   pull_request:
     types: [opened, synchronize]
+  workflow_dispatch:
 
 permissions:
   contents: read
