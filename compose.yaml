@@ -10,3 +10,16 @@ services:
       - "8080:8080"
     volumes:
       - "./stremio-data:/root/.stremio-server"
+    # Uncomment the following to enable hardware-accelerated transcoding on
+    # Rockchip devices (e.g. Orange Pi 5 Ultra with RK3588) via rkmpp / V4L2 M2M.
+    # The DRM render node is required for rkmpp; /dev/video* nodes are used by
+    # the V4L2 M2M codec driver.  Run `ls /dev/dri /dev/video*` on the host
+    # to confirm the device paths before enabling.
+    #devices:
+    #  - /dev/dri:/dev/dri           # DRM render node (required for rkmpp)
+    #  - /dev/dma_heap:/dev/dma_heap # DMA-heap allocator (needed by MPP)
+    #  - /dev/rga:/dev/rga           # Rockchip RGA 2-D accelerator (optional)
+    # To also pass through V4L2 codec devices add a device_cgroup_rules entry
+    # and mount each /dev/videoN device, e.g.:
+    #  - /dev/video0:/dev/video0
+    #  - /dev/video1:/dev/video1
