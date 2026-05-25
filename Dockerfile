@@ -6,42 +6,13 @@ RUN --mount=type=cache,id=apk-base,target=/var/cache/apk \
   apk update && apk upgrade
 
 ##########################################################################
-# FFmpeg stage: nyanmisaka/ffmpeg-rockchip for aarch64, jellyfin-ffmpeg for x86_64
+# FFmpeg stage: jellyfin-ffmpeg v4.4.1-4 for all architectures
 FROM base AS ffmpeg
 
 ENV BIN="/usr/bin"
 
 COPY ./patches/ffmpeg-mathops-binutils241.patch /tmp/ffmpeg-mathops-binutils241.patch
 COPY ./patches/ffmpeg-mlpdsp-armv5te-binutils243.patch /tmp/ffmpeg-mlpdsp-armv5te-binutils243.patch
-
-# Build Rockchip MPP (required for aarch64/RK3588 hardware decode)
-RUN if [ "$(uname -m)" = "aarch64" ]; then \
-  apk add --no-cache git cmake build-base libdrm-dev linux-headers && \
-  DIR=$(mktemp -d) && \
-  git clone --depth 1 https://github.com/rockchip-linux/mpp.git "${DIR}" && \
-  cmake -B "${DIR}/build" -S "${DIR}" \
-    -DRKPLATFORM=ON \
-    -DHAVE_DRM=ON \
-    -DBUILD_TEST=OFF \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr && \
-  make -C "${DIR}/build" -j"$(nproc)" && \
-  make -C "${DIR}/build" install && \
-  rm -rf "${DIR}"; \
-fi
-
-# Build Rockchip RGA (2D acceleration, required for zero-copy pipeline)
-RUN if [ "$(uname -m)" = "aarch64" ]; then \
-  apk add --no-cache git cmake build-base && \
-  DIR=$(mktemp -d) && \
-  git clone --depth 1 https://github.com/airockchip/librga.git "${DIR}" && \
-  cmake -B "${DIR}/build" -S "${DIR}" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr && \
-  make -C "${DIR}/build" -j"$(nproc)" && \
-  make -C "${DIR}/build" install && \
-  rm -rf "${DIR}"; \
-fi
 
 # Install build dependencies
 RUN apk add --no-cache --virtual .build-dependencies \
@@ -77,105 +48,60 @@ RUN apk add --no-cache --virtual .build-dependencies \
   git \
   x264
 
-# Build ffmpeg: nyanmisaka/ffmpeg-rockchip on aarch64, jellyfin-ffmpeg on x86_64
+# Build ffmpeg: jellyfin-ffmpeg v4.4.1-4 for all architectures.
+# linux-headers (in .build-dependencies) auto-enables V4L2 M2M for aarch64 (RK3588 rkvdec2).
+# VAAPI is disabled on 32-bit ARM (not supported) and enabled on x86_64.
 RUN DIR=$(mktemp -d) && \
   cd "${DIR}" && \
-  ARCH="$(uname -m)" && \
-  if [ "$ARCH" = "aarch64" ]; then \
-    # Use nyanmisaka's fork with full MPP/RGA support for RK3588
-    git clone --depth 1 https://github.com/nyanmisaka/ffmpeg-rockchip.git && \
-    cd ffmpeg-rockchip && \
-    ./configure \
-      --bindir="$BIN" \
-      --prefix=/usr/lib/jellyfin-ffmpeg \
-      --disable-debug \
-      --disable-doc \
-      --disable-ffplay \
-      --disable-shared \
-      --disable-libxcb \
-      --disable-sdl2 \
-      --disable-xlib \
-      --disable-vaapi \
-      --extra-cflags="-Wno-error -Wno-error=deprecated-declarations -Wno-error=discarded-qualifiers" \
-      --extra-version=Jellyfin-Rockchip \
-      --enable-lto \
-      --enable-gpl \
-      --enable-version3 \
-      --enable-gmp \
-      --enable-gnutls \
-      --enable-libdrm \
-      --enable-libass \
-      --enable-libfreetype \
-      --enable-libfribidi \
-      --enable-libfontconfig \
-      --enable-libbluray \
-      --enable-libmp3lame \
-      --enable-libopus \
-      --enable-libtheora \
-      --enable-libvorbis \
-      --enable-libdav1d \
-      --enable-libwebp \
-      --enable-libvpx \
-      --enable-libx264 \
-      --enable-libx265 \
-      --enable-libzimg \
-      --enable-small \
-      --enable-nonfree \
-      --enable-libxvid \
-      --enable-libaom \
-      --enable-libfdk_aac \
-      --enable-rkmpp \
-      --enable-rkrga \
-      --toolchain=hardened; \
-  else \
-    # Use jellyfin-ffmpeg with VAAPI for x86_64
-    git clone --depth 1 --branch v4.4.1-4 https://github.com/jellyfin/jellyfin-ffmpeg.git && \
-    cd jellyfin-ffmpeg* && \
-    awk '/^diff --git /,0' /tmp/ffmpeg-mathops-binutils241.patch | patch -p1 && \
-    awk '/^diff --git /,0' /tmp/ffmpeg-mlpdsp-armv5te-binutils243.patch | patch -p1 && \
-    ./configure \
-      --bindir="$BIN" \
-      --prefix=/usr/lib/jellyfin-ffmpeg \
-      --disable-debug \
-      --disable-doc \
-      --disable-ffplay \
-      --disable-shared \
-      --disable-libxcb \
-      --disable-sdl2 \
-      --disable-xlib \
-      --extra-cflags="-Wno-error -Wno-error=deprecated-declarations -Wno-error=discarded-qualifiers" \
-      --extra-version=Jellyfin \
-      --enable-lto \
-      --enable-gpl \
-      --enable-version3 \
-      --enable-gmp \
-      --enable-gnutls \
-      --enable-libdrm \
-      --enable-libass \
-      --enable-libfreetype \
-      --enable-libfribidi \
-      --enable-libfontconfig \
-      --enable-libbluray \
-      --enable-libmp3lame \
-      --enable-libopus \
-      --enable-libtheora \
-      --enable-libvorbis \
-      --enable-libdav1d \
-      --enable-libwebp \
-      --enable-libvpx \
-      --enable-libx264 \
-      --enable-libx265 \
-      --enable-libzimg \
-      --enable-small \
-      --enable-nonfree \
-      --enable-libxvid \
-      --enable-libaom \
-      --enable-libfdk_aac \
-      --enable-vaapi \
-      --enable-hwaccel=h264_vaapi \
-      --enable-hwaccel=hevc_vaapi \
-      --toolchain=hardened; \
-  fi && \
+  case "$(uname -m)" in \
+    armv6l|armv7l) VAAPI_FLAGS="--disable-vaapi --disable-hwaccel=h264_vaapi --disable-hwaccel=hevc_vaapi" ;; \
+    x86_64)        VAAPI_FLAGS="--enable-vaapi --enable-hwaccel=h264_vaapi --enable-hwaccel=hevc_vaapi" ;; \
+    *)             VAAPI_FLAGS="" ;; \
+  esac && \
+  git clone --depth 1 --branch v4.4.1-4 https://github.com/jellyfin/jellyfin-ffmpeg.git && \
+  cd jellyfin-ffmpeg* && \
+  awk '/^diff --git /,0' /tmp/ffmpeg-mathops-binutils241.patch | patch -p1 && \
+  awk '/^diff --git /,0' /tmp/ffmpeg-mlpdsp-armv5te-binutils243.patch | patch -p1 && \
+  ./configure \
+    --bindir="$BIN" \
+    --prefix=/usr/lib/jellyfin-ffmpeg \
+    --disable-debug \
+    --disable-doc \
+    --disable-ffplay \
+    --disable-shared \
+    --disable-libxcb \
+    --disable-sdl2 \
+    --disable-xlib \
+    --extra-cflags="-Wno-error -Wno-error=deprecated-declarations -Wno-error=discarded-qualifiers" \
+    --extra-version=Jellyfin \
+    --enable-lto \
+    --enable-gpl \
+    --enable-version3 \
+    --enable-gmp \
+    --enable-gnutls \
+    --enable-libdrm \
+    --enable-libass \
+    --enable-libfreetype \
+    --enable-libfribidi \
+    --enable-libfontconfig \
+    --enable-libbluray \
+    --enable-libmp3lame \
+    --enable-libopus \
+    --enable-libtheora \
+    --enable-libvorbis \
+    --enable-libdav1d \
+    --enable-libwebp \
+    --enable-libvpx \
+    --enable-libx264 \
+    --enable-libx265 \
+    --enable-libzimg \
+    --enable-small \
+    --enable-nonfree \
+    --enable-libxvid \
+    --enable-libaom \
+    --enable-libfdk_aac \
+    ${VAAPI_FLAGS} \
+    --toolchain=hardened && \
   make -j"$(nproc)" && \
   make install && \
   find /usr/lib/jellyfin-ffmpeg -name '*.a' -delete && \
@@ -183,13 +109,6 @@ RUN DIR=$(mktemp -d) && \
   make distclean && \
   rm -rf "${DIR}" && \
   apk del --purge .build-dependencies
-
-# Collect rockchip runtime libs for final image
-RUN mkdir -p /opt/rockchip-libs && \
-  if [ "$(uname -m)" = "aarch64" ]; then \
-    find /usr/lib -maxdepth 1 \( -name 'librockchip*' -o -name 'librga*' \) \
-      -exec cp {} /opt/rockchip-libs/ \; ; \
-  fi
 
 ##########################################################################
 # Builder image
@@ -276,9 +195,6 @@ ENV AUTO_SERVER_URL=0
 # Copy ffmpeg binaries
 COPY --from=ffmpeg /usr/bin/ffmpeg /usr/bin/ffprobe /usr/bin/
 COPY --from=ffmpeg /usr/lib/jellyfin-ffmpeg /usr/lib/jellyfin-ffmpeg
-
-# Copy rockchip runtime libs (empty on non-aarch64)
-COPY --from=ffmpeg /opt/rockchip-libs/ /usr/lib/
 
 # Add common runtime libs
 RUN apk add --no-cache \
