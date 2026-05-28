@@ -5,19 +5,27 @@ RUN --mount=type=cache,id=apk-base,target=/var/cache/apk \
   apk update && apk upgrade
 
 ##########################################################################
-# NEW: Rockchip MPP build stage
+# Rockchip MPP build stage (only compiled on arm64; skipped on all other arches)
 FROM base AS mpp-builder
+
+ARG TARGETARCH
 
 RUN apk add --no-cache build-base cmake git linux-headers libdrm-dev
 
-RUN git clone --depth 1 https://github.com/rockchip-linux/mpp.git /tmp/mpp && \
-  cmake -B /tmp/mpp/build /tmp/mpp \
-    -DRKPLATFORM=ON \
-    -DHAVE_DRM=ON \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_BUILD_TYPE=Release && \
-  cmake --build /tmp/mpp/build -j$(nproc) && \
-  cmake --install /tmp/mpp/build
+# Build MPP only when targeting arm64 (RK3588). On every other arch we create
+# a harmless placeholder so the COPY --from=mpp-builder glob never fails.
+RUN mkdir -p /usr/include/rockchip && \
+  if [ "$TARGETARCH" = "arm64" ]; then \
+    git clone --depth 1 https://github.com/rockchip-linux/mpp.git /tmp/mpp && \
+    cmake -B /tmp/mpp/build /tmp/mpp \
+      -DRKPLATFORM=ON \
+      -DHAVE_DRM=ON \
+      -DCMAKE_INSTALL_PREFIX=/usr \
+      -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build /tmp/mpp/build -j$(nproc) && \
+    cmake --install /tmp/mpp/build; \
+  fi && \
+  ls /usr/lib/librockchip_mpp* 2>/dev/null || touch /usr/lib/librockchip_mpp.placeholder
 
 ##########################################################################
 # FFmpeg stage
