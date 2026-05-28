@@ -1,12 +1,26 @@
 # syntax=docker/dockerfile:1
-# Base: Node 20 on Alpine 3.23
 FROM node:20-alpine3.23 AS base
 
 RUN --mount=type=cache,id=apk-base,target=/var/cache/apk \
   apk update && apk upgrade
 
 ##########################################################################
-# FFmpeg stage: jellyfin-ffmpeg v4.4.1-4 for all architectures
+# NEW: Rockchip MPP build stage
+FROM base AS mpp-builder
+
+RUN apk add --no-cache build-base cmake git linux-headers libdrm-dev
+
+RUN git clone --depth 1 https://github.com/rockchip-linux/mpp.git /tmp/mpp && \
+  cmake -B /tmp/mpp/build /tmp/mpp \
+    -DRKPLATFORM=ON \
+    -DHAVE_DRM=ON \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=Release && \
+  cmake --build /tmp/mpp/build -j$(nproc) && \
+  cmake --install /tmp/mpp/build
+
+##########################################################################
+# FFmpeg stage
 FROM base AS ffmpeg
 
 ENV BIN="/usr/bin"
@@ -14,7 +28,10 @@ ENV BIN="/usr/bin"
 COPY ./patches/ffmpeg-mathops-binutils241.patch /tmp/ffmpeg-mathops-binutils241.patch
 COPY ./patches/ffmpeg-mlpdsp-armv5te-binutils243.patch /tmp/ffmpeg-mlpdsp-armv5te-binutils243.patch
 
-# Install build dependencies
+# NEW: copy MPP headers and libs so ffmpeg can link against them
+COPY --from=mpp-builder /usr/lib/librockchip_mpp* /usr/lib/
+COPY --from=mpp-builder /usr/include/rockchip /usr/include/rockchip
+
 RUN apk add --no-cache --virtual .build-dependencies \
   gnutls \
   freetype-dev \
@@ -48,14 +65,12 @@ RUN apk add --no-cache --virtual .build-dependencies \
   git \
   x264
 
-# Build ffmpeg: jellyfin-ffmpeg v4.4.1-4 for all architectures.
-# linux-headers (in .build-dependencies) auto-enables V4L2 M2M for aarch64 (RK3588 rkvdec2).
-# VAAPI is disabled on 32-bit ARM (not supported) and enabled on x86_64.
 RUN DIR=$(mktemp -d) && \
   cd "${DIR}" && \
   case "$(uname -m)" in \
     armv6l|armv7l) VAAPI_FLAGS="--disable-vaapi --disable-hwaccel=h264_vaapi --disable-hwaccel=hevc_vaapi" ;; \
     x86_64)        VAAPI_FLAGS="--enable-vaapi --enable-hwaccel=h264_vaapi --enable-hwaccel=hevc_vaapi" ;; \
+    aarch64)       VAAPI_FLAGS="--enable-rkmpp" ;; \
     *)             VAAPI_FLAGS="" ;; \
   esac && \
   git clone --depth 1 --branch v4.4.1-4 https://github.com/jellyfin/jellyfin-ffmpeg.git && \
@@ -111,7 +126,7 @@ RUN DIR=$(mktemp -d) && \
   apk del --purge .build-dependencies
 
 ##########################################################################
-# Builder image
+# Builder image (unchanged)
 FROM base AS builder-web
 
 WORKDIR /srv
@@ -167,6 +182,9 @@ COPY ./restart_if_idle.sh ./
 RUN chmod +x restart_if_idle.sh
 COPY localStorage.json ./
 
+# NEW: copy MPP runtime library
+COPY --from=mpp-builder /usr/lib/librockchip_mpp* /usr/lib/
+
 ENV FFMPEG_BIN=
 ENV FFPROBE_BIN=
 ENV WEBUI_LOCATION=
@@ -192,17 +210,14 @@ ENV CERT_FILE=
 ENV SERVER_URL=
 ENV AUTO_SERVER_URL=0
 
-# Copy ffmpeg binaries
 COPY --from=ffmpeg /usr/bin/ffmpeg /usr/bin/ffprobe /usr/bin/
 COPY --from=ffmpeg /usr/lib/jellyfin-ffmpeg /usr/lib/jellyfin-ffmpeg
 
-# Add common runtime libs
 RUN apk add --no-cache \
   libwebp libwebpmux libvorbis x265-libs x264-libs libass opus \
   libgmpxx lame-libs gnutls libvpx libtheora libdrm libbluray \
   zimg libdav1d aom-libs xvidcore fdk-aac libva
 
-# Add arch-specific runtime libs
 RUN if [ "$(uname -m)" = "x86_64" ]; then \
     apk add --no-cache intel-media-driver mesa-va-gallium; \
   fi
@@ -210,7 +225,6 @@ RUN if [ "$(uname -m)" = "x86_64" ]; then \
 RUN --mount=type=cache,id=apk-base,target=/var/cache/apk \
   apk update && apk upgrade
 
-# Clean up
 RUN rm -rf /opt/yarn-v* /usr/local/lib/node_modules \
   && rm -f /usr/local/bin/yarn /usr/local/bin/yarnpkg \
      /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
