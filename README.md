@@ -1,4 +1,4 @@
-# Easy stremio on Docker
+# Easy stremio on Docker for Orange Pi
 
 ## Introduction
 
@@ -6,7 +6,7 @@
 
 The Docker images in this repository bundle stremio-server, ffmpeg and web player for you, ready to use in a small Alpine image.
 
-I built this to run Stremio on my Raspberry Pi 5 and couldn't find something that has both player and server but also the official image seemed too big but also lacks the Web Player and doesn't work out of the box if no HTTPS is configured.
+I built this to run Stremio on my Raspberry Pi 5 and couldn't find something that has both player and server but also the official image seemed too big but also lacks the Web Player and doesn't work out of the box if no HTTPS is configured. The image is also optimized to run on **Orange Pi** boards (including Orange Pi 5/8K with the Rockchip RK3588 SoC), with FFmpeg compiled for `arm64` with V4L2 M2M support for hardware-accelerated video decoding via the RK3588's `rkvdec2` engine.
 
 ## Features
 
@@ -15,7 +15,7 @@ I built this to run Stremio on my Raspberry Pi 5 and couldn't find something tha
 - **Automatic Server Configuration:** Use `AUTO_SERVER_URL` or `SERVER_URL` to automatically configure the streaming server URL in the web player.
 - **HTTPS Out-of-the-Box:** Automatically generates and uses SSL certificates when an `IPADDRESS` is provided.
 - **Custom Certificates:** Supports using your own domain and SSL certificates.
-- **Hardware Acceleration (Linux hosts):** Includes ffmpeg with VAAPI support for Intel and AMD GPUs when you pass through the GPU on Linux (see [FFMPEG](#ffmpeg)).
+- **Hardware Acceleration (Linux hosts):** Includes ffmpeg with VAAPI support for Intel and AMD GPUs when you pass through the GPU on Linux (see [FFMPEG](#ffmpeg)). On **Orange Pi** boards with Rockchip RK3588 (e.g. Orange Pi 5, Orange Pi 8K), hardware decoding via V4L2 M2M (`rkvdec2`) is supported — pass through `/dev/video*` devices to enable it.
 - **Cross-Platform:** Builds are available for `amd64`, `arm/v6`, `arm/v7`, `arm64/v8`, and `ppc64le`.
 - **Runs on Linux, Windows, and macOS:** Use Docker Engine on Linux or [Docker Desktop](https://www.docker.com/products/docker-desktop/) on Windows and macOS—the same `docker` / `docker compose` commands apply. On **macOS**, Docker pulls the matching image for your Mac: **Intel** (`linux/amd64`) or **Apple Silicon (M series)** (`linux/arm64`).
 - **Transcoding on Windows and macOS:** When you run this container on **Windows** or **macOS**, transcoding uses the **CPU** only. GPU/VAAPI passthrough (see [FFMPEG](#ffmpeg)) is for **Linux** hosts.
@@ -198,6 +198,7 @@ We build our own ffmpeg from the jellyfin repo (version 4.4.1-4), which includes
 - Hardware acceleration support for both Intel and AMD (VAAPI)
 - Multiple codec support (H.264, HEVC, VP9, etc.)
 - Optimized for streaming workloads
+- **Orange Pi / Rockchip RK3588 (arm64):** Built with `libdrm` and V4L2 M2M support for hardware-accelerated decoding via the RK3588's `rkvdec2` engine
 
 On **Linux**, hardware acceleration is used when the GPU is available to the container. To enable it, you must expose your GPU device to the container.
 
@@ -225,6 +226,32 @@ docker run -d \
   --device /dev/dri:/dev/dri \
   tsaridas/stremio-docker:latest
 ```
+
+**Support for Orange Pi / Rockchip RK3588 Hardware Decoding (V4L2 M2M) — Linux only**
+
+Orange Pi boards running an RK3588 SoC (Orange Pi 5, Orange Pi 8K, etc.) support hardware-accelerated video decoding via the `rkvdec2` V4L2 M2M driver. Pass the video devices through to the container:
+
+**Docker Compose:**
+```yaml
+services:
+  stremio:
+    # ... your other config
+    devices:
+      - "/dev/video0:/dev/video0"
+      - "/dev/video1:/dev/video1"
+      # Add all /dev/video* devices exposed by rkvdec2 on your board
+```
+
+**Docker CLI:**
+```bash
+docker run -d \
+  # ... your other flags \
+  --device /dev/video0:/dev/video0 \
+  --device /dev/video1:/dev/video1 \
+  tsaridas/stremio-docker:latest
+```
+
+> To see which `/dev/video*` nodes are available on your Orange Pi, run `ls /dev/video*` on the host.
 
 ### Builds
 
