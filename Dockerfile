@@ -14,7 +14,7 @@ RUN apk add --no-cache build-base cmake git linux-headers libdrm-dev
 
 # Build MPP only when targeting arm64 (RK3588). On every other arch we create
 # a harmless placeholder so the COPY --from=mpp-builder glob never fails.
-RUN mkdir -p /usr/include/rockchip && \
+RUN mkdir -p /usr/include/rockchip /usr/lib/pkgconfig && \
   if [ "$TARGETARCH" = "arm64" ]; then \
     git clone --depth 1 https://github.com/rockchip-linux/mpp.git /tmp/mpp && \
     cmake -B /tmp/mpp/build /tmp/mpp \
@@ -25,7 +25,8 @@ RUN mkdir -p /usr/include/rockchip && \
     cmake --build /tmp/mpp/build -j$(nproc) && \
     cmake --install /tmp/mpp/build; \
   fi && \
-  ls /usr/lib/librockchip_mpp* 2>/dev/null || touch /usr/lib/librockchip_mpp.placeholder
+  ls /usr/lib/librockchip_mpp* 2>/dev/null || touch /usr/lib/librockchip_mpp.placeholder && \
+  ls /usr/lib/pkgconfig/rockchip_mpp.pc 2>/dev/null || touch /usr/lib/pkgconfig/rockchip_mpp.placeholder
 
 ##########################################################################
 # FFmpeg stage
@@ -36,8 +37,9 @@ ENV BIN="/usr/bin"
 COPY ./patches/ffmpeg-mathops-binutils241.patch /tmp/ffmpeg-mathops-binutils241.patch
 COPY ./patches/ffmpeg-mlpdsp-armv5te-binutils243.patch /tmp/ffmpeg-mlpdsp-armv5te-binutils243.patch
 
-# NEW: copy MPP headers and libs so ffmpeg can link against them
+# Copy MPP headers, libs and pkg-config so ffmpeg configure can find rockchip_mpp
 COPY --from=mpp-builder /usr/lib/librockchip_mpp* /usr/lib/
+COPY --from=mpp-builder /usr/lib/pkgconfig/rockchip_mpp* /usr/lib/pkgconfig/
 COPY --from=mpp-builder /usr/include/rockchip /usr/include/rockchip
 
 RUN apk add --no-cache --virtual .build-dependencies \
@@ -71,7 +73,11 @@ RUN apk add --no-cache --virtual .build-dependencies \
   libva-dev \
   linux-headers \
   git \
-  x264
+  x264 \
+  pkgconf \
+  fribidi-dev \
+  fontconfig-dev \
+  gmp-dev
 
 RUN DIR=$(mktemp -d) && \
   cd "${DIR}" && \
